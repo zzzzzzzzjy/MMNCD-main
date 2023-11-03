@@ -29,18 +29,18 @@ class MLP(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_hidden_layers=1):
         super().__init__()
 
-        # layers = [
-        #     nn.Linear(input_dim, hidden_dim),
-        #     nn.BatchNorm1d(hidden_dim),
-        #     nn.ReLU(inplace=True),
-        # ]
-        # for _ in range(num_hidden_layers - 1):
-        #     layers += [
-        #         nn.Linear(hidden_dim, hidden_dim),
-        #         nn.BatchNorm1d(hidden_dim),
-        #         nn.ReLU(inplace=True),
-        #     ]
-        # layers.append(nn.Linear(hidden_dim, output_dim))
+        layers = [
+            nn.Linear(input_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ReLU(inplace=True),
+        ]
+        for _ in range(num_hidden_layers - 1):
+            layers += [
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU(inplace=True),
+            ]
+        layers.append(nn.Linear(hidden_dim, output_dim))
         layers = [nn.Linear(input_dim, output_dim),]
         self.mlp = nn.Sequential(*layers)       # linear(input-hidden), batchnorm1d, relu, linear(hidden-output)
 
@@ -49,8 +49,6 @@ class MLP(nn.Module):
 
 
 
-#num_heads个MLP和prototype层，MLP两个线性层：input-hidden-output; prototype: output-num_prototypes
-#总结： 一个head就是一个MLP(双线性层) + 一个prototype(单线性层)
 class MultiHead(nn.Module):
     def __init__(
         self, input_dim, hidden_dim, output_dim, num_prototypes, num_heads, num_hidden_layers=1
@@ -84,12 +82,6 @@ class MultiHead(nn.Module):
         return [torch.stack(o) for o in map(list, zip(*out))]
 
 
-
-# model比较简单，首先一个 encoder，这里采用的resnet18, 我们的实验中替换成了resnet50
-# pretrain stage: 只有 labeled head: 分类的线性层，
-# discover stage: 分head_unlabel 和 head_unlabel_over
-# head_unlabel包含 num_heads个head(MLP + prototype)
-# head_unlabel_over 同样包含 num_heads个head(MLP+prototype), 不同的是 prototype的输出是 over_factor * num_unlabeled_classes
 
 class MultiHeadResNet(nn.Module):
     def __init__(
@@ -198,8 +190,7 @@ class MultiHeadBERT(nn.Module):
 
         # backbone
         # self.tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
-        # self.text_encoder = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
-        self.text_encoder = AutoModel.from_pretrained("/MMUNO/bioclinicalbert")
+        self.text_encoder = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
         self.feat_dim = 768
 
         self.text_head_lab = Prototypes(self.feat_dim, num_labeled)
@@ -276,8 +267,7 @@ class MultiHeadConcat(nn.Module):
 
         # backbone
         # self.tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
-        # self.text_encoder = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
-        self.text_encoder = AutoModel.from_pretrained("/MMUNO/bioclinicalbert")
+        self.text_encoder = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
         self.feat_dim = 768 + 2048
 
         self.img_encoder = models.__dict__[arch]()
