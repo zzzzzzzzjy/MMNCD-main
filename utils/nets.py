@@ -201,8 +201,7 @@ class MultiHeadBERT(nn.Module):
 
         # backbone
         # self.tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
-        # self.text_encoder = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
-        self.text_encoder = AutoModel.from_pretrained("/MMNCD-main-paper/bioclinicalbert")
+        self.text_encoder = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
         self.feat_dim = 768
         self.emb_dim = 512
         self.proj_head = nn.Linear(self.feat_dim, self.emb_dim)
@@ -282,8 +281,7 @@ class MultiHeadConcat(nn.Module):
 
         # backbone
         # self.tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
-        # self.text_encoder = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
-        self.text_encoder = AutoModel.from_pretrained("/MMNCD-main-paper/bioclinicalbert")
+        self.text_encoder = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
         self.feat_dim = 768 + 2048
         self.emb_dim = 512
 
