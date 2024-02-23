@@ -41,6 +41,7 @@ class MLP(nn.Module):
                 nn.ReLU(inplace=True),
             ]
         layers.append(nn.Linear(hidden_dim, output_dim))
+
         layers = [nn.Linear(input_dim, output_dim),]
         self.mlp = nn.Sequential(*layers)       # linear(input-hidden), batchnorm1d, relu, linear(hidden-output)
 
@@ -49,6 +50,8 @@ class MLP(nn.Module):
 
 
 
+#num_heads个MLP和prototype层，MLP两个线性层：input-hidden-output; prototype: output-num_prototypes
+#总结： 一个head就是一个MLP(双线性层) + 一个prototype(单线性层)
 class MultiHead(nn.Module):
     def __init__(
         self, input_dim, hidden_dim, output_dim, num_prototypes, num_heads, num_hidden_layers=1
@@ -83,6 +86,7 @@ class MultiHead(nn.Module):
 
 
 
+
 class MultiHeadResNet(nn.Module):
     def __init__(
         self,
@@ -102,16 +106,21 @@ class MultiHeadResNet(nn.Module):
         self.img_encoder = models.__dict__[arch]()
         self.feat_dim = self.img_encoder.fc.weight.shape[1]
         self.img_encoder.fc = nn.Identity()
+
+        self.emb_dim = 512
+        self.proj_head = nn.Linear(self.feat_dim, self.emb_dim)   # embeddings
+
         # modify the encoder for lower resolution
         if low_res:
             self.img_encoder.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
             self.img_encoder.maxpool = nn.Identity()
             self._reinit_all_layers()
 
-        self.img_head_lab = Prototypes(self.feat_dim, num_labeled)
+        self.img_head_lab = Prototypes(self.emb_dim, num_labeled)
+
         if num_heads is not None:
             self.img_head_unlab = MultiHead(
-                input_dim=self.feat_dim,
+                input_dim=self.emb_dim,
                 hidden_dim=hidden_dim,
                 output_dim=proj_dim,
                 num_prototypes=num_unlabeled,
@@ -119,7 +128,7 @@ class MultiHeadResNet(nn.Module):
                 num_hidden_layers=num_hidden_layers,
             )
             self.img_head_unlab_over = MultiHead(
-                input_dim=self.feat_dim,
+                input_dim=self.emb_dim,
                 hidden_dim=hidden_dim,
                 output_dim=proj_dim,
                 num_prototypes=num_unlabeled * overcluster_factor,
@@ -159,20 +168,22 @@ class MultiHeadResNet(nn.Module):
         return out
 
     def forward(self, views):
-        # print(type(views))
         if isinstance(views, list):
             print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
             feats = [self.img_encoder(view) for view in views]
-            out = [self.forward_heads(f) for f in feats]
-            out_dict = {"img_feats": torch.stack(feats)}
+            embs = [self.proj_head(feat) for feat in feats]
+            out = [self.forward_heads(emb) for emb in embs]
+            out_dict = {"img_embs": torch.stack(embs)}
             for key in out[0].keys():
                 out_dict[key] = torch.stack([o[key] for o in out])
             return out_dict
         else:
             feats = self.img_encoder(views)
-            out = self.forward_heads(feats)
-            out["img_feats"] = feats
+            embs = self.proj_head(feats)
+            out = self.forward_heads(embs)
+            out["img_embs"] = embs
             return out
+
 
 
 class MultiHeadBERT(nn.Module):
@@ -190,13 +201,16 @@ class MultiHeadBERT(nn.Module):
 
         # backbone
         # self.tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
-        self.text_encoder = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
+        # self.text_encoder = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
+        self.text_encoder = AutoModel.from_pretrained("/MMNCD-main-paper/bioclinicalbert")
         self.feat_dim = 768
+        self.emb_dim = 512
+        self.proj_head = nn.Linear(self.feat_dim, self.emb_dim)
 
-        self.text_head_lab = Prototypes(self.feat_dim, num_labeled)
+        self.text_head_lab = Prototypes(self.emb_dim, num_labeled)
         if num_heads is not None:
             self.text_head_unlab = MultiHead(
-                input_dim=self.feat_dim,
+                input_dim=self.emb_dim,
                 hidden_dim=hidden_dim,
                 output_dim=proj_dim,
                 num_prototypes=num_unlabeled,
@@ -204,7 +218,7 @@ class MultiHeadBERT(nn.Module):
                 num_hidden_layers=num_hidden_layers,
             )
             self.text_head_unlab_over = MultiHead(
-                input_dim=self.feat_dim,
+                input_dim=self.emb_dim,
                 hidden_dim=hidden_dim,
                 output_dim=proj_dim,
                 num_prototypes=num_unlabeled * overcluster_factor,
@@ -245,8 +259,9 @@ class MultiHeadBERT(nn.Module):
 
     def forward(self, texts):
         xx, text_features = self.text_encoder(input_ids=texts['input_ids'].squeeze(1), attention_mask=texts['attention_mask'], return_dict=False)
-        out = self.forward_heads(text_features)
-        out["text_feats"] = text_features
+        text_embs = self.proj_head(text_features)
+        out = self.forward_heads(text_embs)
+        out["text_embs"] = text_embs
         return out
 
 
@@ -267,8 +282,10 @@ class MultiHeadConcat(nn.Module):
 
         # backbone
         # self.tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
-        self.text_encoder = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
+        # self.text_encoder = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
+        self.text_encoder = AutoModel.from_pretrained("/MMNCD-main-paper/bioclinicalbert")
         self.feat_dim = 768 + 2048
+        self.emb_dim = 512
 
         self.img_encoder = models.__dict__[arch]()
         # self.feat_dim = self.img_encoder.fc.weight.shape[1]
