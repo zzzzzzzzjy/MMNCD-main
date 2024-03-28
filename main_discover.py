@@ -9,8 +9,7 @@ from torchvision import models
 import torch.nn as nn
 
 import os
-os.environ["WANDB_API_KEY"] = 'a7ccbe87671159f0147c1baf72b1da302ecec4dd'
-
+import math
 
 from utils.data import get_datamodule
 from utils.nets import MMCXRNCD
@@ -29,23 +28,28 @@ def kl_divergence(matrix1, matrix2):
     divergence = np.sum(matrix1 * np.log(matrix1 / matrix2))
     return divergence
 
-
+def pairwise_similarity(img, text):
+    img_sim = torch.matmul(img, img.transpose(-1, -2))  # a, a, a: number of unlabeled samples in a batch
+    text_sim = torch.matmul(text, text.transpose(-1, -2))  # a, a
+    img_sim = F.normalize(img_sim, dim=-1)
+    text_sim = F.normalize(text_sim, dim=-1)
+    return img_sim, text_sim
 
 parser = ArgumentParser()
 parser.add_argument("--dataset", default="MIMIC", type=str, help="dataset")
 parser.add_argument("--download", default=False, action="store_true", help="wether to download")
-parser.add_argument("--log_dir", default="./logs", type=str, help="log directory")
+parser.add_argument("--log_dir", default="/MMNCD-main-paper/logs", type=str, help="log directory")
 parser.add_argument("--batch_size", default=128, type=int, help="batch size")
 parser.add_argument("--num_workers", default=10, type=int, help="number of workers")
 parser.add_argument("--arch", default="resnet50", type=str, help="backbone architecture")
-parser.add_argument("--base_lr", default=1e-4, type=float, help="learning rate")
-parser.add_argument("--min_lr", default=1e-6, type=float, help="min learning rate")
+parser.add_argument("--base_lr", default=0.0001, type=float, help="learning rate")
+parser.add_argument("--min_lr", default=0.000001, type=float, help="min learning rate")
 parser.add_argument("--momentum_opt", default=0.9, type=float, help="momentum for optimizer")
 parser.add_argument("--weight_decay_opt", default=1.5e-6, type=float, help="weight decay")
 parser.add_argument("--warmup_epochs", default=10, type=int, help="warmup epochs")
 parser.add_argument("--proj_dim", default=256, type=int, help="projected dim")
 parser.add_argument("--hidden_dim", default=2048, type=int, help="hidden dim in proj/pred head")
-parser.add_argument("--overcluster_factor", default=3, type=int, help="overclustering factor")
+parser.add_argument("--overcluster_factor", default=0, type=int, help="overclustering factor")
 parser.add_argument("--num_heads", default=4, type=int, help="number of heads for clustering")
 parser.add_argument("--num_hidden_layers", default=1, type=int, help="number of hidden layers")
 parser.add_argument("--num_iters_sk", default=3, type=int, help="number of iters for Sinkhorn")
@@ -83,15 +87,11 @@ class Discoverer(pl.LightningModule):
         )
 
         #load params from pretrained gloria
-        image_pretrained = torch.load('./pretrained/sub1_set1_resnet.pth')
-        text_pretrained = torch.load('./pretrained/sub1_set1_bio.pth')
+        image_pretrained = torch.load('/MMNCD-main/pretrained/sub1_set1_resnet.pth')
+        text_pretrained = torch.load('/MMNCD-main/pretrained/sub1_set1_bio.pth')
 
         self.model.image_branch.img_encoder.load_state_dict(image_pretrained.state_dict(), strict=False)
         self.model.text_branch.text_encoder.load_state_dict(text_pretrained.state_dict(), strict=False)
-
-        # freeze text encoder
-        # for param in self.model.text_branch.text_encoder.parameters():
-        #     param.requires_grad = False
 
         # Sinkorn-Knopp
         self.sk = SinkhornKnopp(
@@ -169,9 +169,6 @@ class Discoverer(pl.LightningModule):
         # forward
         img_outputs, text_outputs = self.model(images, texts)
 
-        lab_img_logits = img_outputs['img_logits_lab'][mask_lab, :]
-        lab_text_logits = text_outputs['text_logits_lab'][mask_lab, :]
-
         # gather outputs
         img_outputs['img_logits_lab'] = (
             img_outputs['img_logits_lab'].unsqueeze(0).expand(self.hparams.num_heads, -1, -1)
@@ -185,25 +182,6 @@ class Discoverer(pl.LightningModule):
 
         text_logits = torch.cat([text_outputs['text_logits_lab'], text_outputs['text_logits_unlab']], dim=-1)
         text_logits_over = torch.cat([text_outputs['text_logits_lab'], text_outputs['text_logits_unlab_over']], dim=-1)
-
-
-        img_feats = img_outputs['img_embs'] #.unsqueeze(0).repeat(self.hparams.num_heads,1,1)
-        text_feats = text_outputs['text_embs'] #.unsqueeze(0).repeat(self.hparams.num_heads,1,1)
-
-        lab_img_feats = img_feats[mask_lab,:]
-        lab_text_feats = text_feats[mask_lab,:]
-        lab_img_feats_sim = torch.matmul(lab_img_feats, lab_img_feats.transpose(-1, -2))  #a,a
-        lab_text_feats_sim = torch.matmul(lab_text_feats, lab_text_feats.transpose(-1,-2))
-
-
-        lab_img_logits_sim = torch.matmul(lab_img_logits, lab_img_logits.transpose(-1, -2))  #a,a
-        lab_text_logits_sim = torch.matmul(lab_text_logits, lab_text_logits.transpose(-1,-2))
-
-        lab_img_consistency = 1/(js_divergence(lab_img_feats_sim, lab_img_logits_sim)+0.001)
-
-        lab_text_consistency = 1/(js_divergence(lab_text_feats_sim, lab_text_logits_sim)+0.001)
-
-
 
 
         # create targets
@@ -245,42 +223,31 @@ class Discoverer(pl.LightningModule):
                 logits=text_outputs['text_logits_unlab_over'][h, ~mask_lab]
             ).type_as(targets)
 
+
+
+
+
+        img_feats = img_outputs['img_embs'] #.unsqueeze(0).repeat(self.hparams.num_heads,1,1)
+        text_feats = text_outputs['text_embs'] #.unsqueeze(0).repeat(self.hparams.num_heads,1,1)
+
         # emb structure similarity
         img_embs = img_feats[~mask_lab, :]
         text_embs = text_feats[~mask_lab, :]
-        img_embs_sim = torch.matmul(img_embs, img_embs.transpose(-1, -2))  # a, a, a: number of unlabeled samples in a batch
-        text_embs_sim = torch.matmul(text_embs, text_embs.transpose(-1, -2))  # a, a
-
+        img_embs_sim, text_embs_sim = pairwise_similarity(img_embs, text_embs)
 
         #pseudo label structure similarity
         img_pls = targets_img[:, ~mask_lab, nlc:]
         text_pls = targets_text[:,~mask_lab, nlc:]
-        img_pls_sim = torch.matmul(img_pls, img_pls.transpose(-1, -2))  # num_heads, a, a
-        text_pls_sim = torch.matmul(text_pls, text_pls.transpose(-1, -2))  # num_heads, a, a
-
-
-        # normalize, not necessary
-        img_embs_sim = F.normalize(img_embs_sim, dim=-1)
-        text_embs_sim = F.normalize(text_embs_sim, dim=-1)
-
-        img_pls_sim = F.normalize(img_pls_sim, dim=-1)
-        text_pls_sim = F.normalize(text_pls_sim, dim=-1)
-
+        img_pls_sim, text_pls_sim = pairwise_similarity(img_pls, text_pls)
 
         unlab_batchsize = img_pls_sim.shape[1]
         img_consist = torch.zeros(self.hparams.num_heads, unlab_batchsize)
         text_consist = torch.zeros(self.hparams.num_heads, unlab_batchsize)
-        import math
 
         for i in range(self.hparams.num_heads):
             for j in range(unlab_batchsize):
-                # print(10*js_divergence(img_embs_sim[j].unsqueeze(0), img_pls_sim[i][j].unsqueeze(0)))
-                # print(10*js_divergence(text_embs_sim[j].unsqueeze(0), text_pls_sim[i][j].unsqueeze(0)))
                 img_consist[i][j] = max(0.1, 1 - 1000*js_divergence(img_embs_sim[j].unsqueeze(0), img_pls_sim[i][j].unsqueeze(0)))
-                # img_consist[i][j] = min(1, img_consist[i][j])
                 text_consist[i][j] = max(0.1, 1 - 1000*js_divergence(text_embs_sim[j].unsqueeze(0), text_pls_sim[i][j].unsqueeze(0)))
-                # text_consist[i][j] = min(1, text_consist[i][j])
-        print(img_consist[1][1])
 
 
         #convert high-confidence pl to one-hot
@@ -307,19 +274,14 @@ class Discoverer(pl.LightningModule):
 
         wei_imgs = torch.zeros(self.hparams.num_heads, unlab_batchsize).to(self.device)
         wei_texts = torch.zeros(self.hparams.num_heads, unlab_batchsize).to(self.device)
-        # wei_imgs_over = torch.zeros(self.hparams.num_heads, unlab_batchsize).to(self.device)
-        # wei_texts_over = torch.zeros(self.hparams.num_heads, unlab_batchsize).to(self.device) #(4,41)
 
         for h in range(self.hparams.num_heads):
             for j in range(unlab_batchsize):
                 wei_imgs[h][j] = img_consist[h][j]/(img_consist[h][j]+text_consist[h][j])
                 wei_texts[h][j] = text_consist[h][j] / (img_consist[h][j] + text_consist[h][j])
-                # wei_imgs_over[h][j] = text_over_consist[h][j] / (img_over_consist[h][j] + text_over_consist[h][j])
-                # wei_texts_over[h][j] = img_over_consist[h][j] / (img_over_consist[h][j] + text_over_consist[h][j])
             targets[h, mask_lab, :nlc] = targets_lab.type_as(targets)
             targets_over[h, mask_lab, :nlc] = targets_lab.type_as(targets_over)
         targets[:, ~mask_lab, nlc:] = (wei_imgs.unsqueeze(-1)*targets_img_unlab+wei_texts.unsqueeze(-1)*targets_text_unlab).type_as(targets)
-        # targets_over[:, ~mask_lab, nlc:] = (wei_imgs_over.unsqueeze(-1)*targets_img_over_unlab+wei_texts_over.unsqueeze(-1)*targets_text_over_unlab).type_as(targets_over)
         targets_over[:, ~mask_lab, nlc:] = 0.5*(targets_img_over_unlab+targets_text_over_unlab)
 
         img_loss_cluster = self.cross_entropy_loss(img_logits, targets)
@@ -334,20 +296,17 @@ class Discoverer(pl.LightningModule):
         # total loss
         img_loss_cluster = img_loss_cluster.mean()
         img_loss_overcluster = img_loss_overcluster.mean()
-        if torch.isnan(img_loss_overcluster).any():
-            print(True)
-            img_loss = img_loss_cluster
-        else:
-            img_loss = (img_loss_cluster+img_loss_overcluster)/2
         text_loss_cluster = text_loss_cluster.mean()
         text_loss_overcluster = text_loss_overcluster.mean()
-        if torch.isnan(text_loss_overcluster).any():
-            print(True)
-            text_loss = text_loss_cluster
-        else:
-            text_loss = (text_loss_cluster+text_loss_overcluster)/2
-        loss = img_loss+text_loss
 
+        if overcluster>0:
+            img_loss = (img_loss_cluster+img_loss_overcluster)/2
+            text_loss = (text_loss_cluster+text_loss_overcluster)/2
+        else:
+            img_loss = img_loss_cluster
+            text_loss =text_loss_cluster
+
+        loss = img_loss+text_loss
 
         #calculate pseudo label accuracy
         mask_label = labels > self.hparams.num_labeled_classes-1
@@ -376,8 +335,8 @@ class Discoverer(pl.LightningModule):
                 pl_acc += cluster_acc(labels_unlab.detach().cpu().numpy(), onehot_pl.detach().cpu().numpy())
 
 
-        img_consistency = -img_consist.mean().item()
-        text_consistency = -text_consist.mean().item()
+        img_consistency = img_consist.mean().item()
+        text_consistency = text_consist.mean().item()
 
         # log
         results = {
@@ -390,8 +349,6 @@ class Discoverer(pl.LightningModule):
             "text pl acc": text_pl_acc,
             "img consistency": img_consistency,
             "text consistency": text_consistency,
-            "lab img consistency": lab_img_consistency,
-            "lab text consistency": lab_text_consistency,
             "pl acc":pl_acc,
             "lr": self.trainer.optimizers[0].param_groups[0]["lr"],
         }
@@ -466,8 +423,6 @@ def main(args):
         entity=args.entity,
         offline=args.offline,
     )
-    # logger = pl.loggers.TensorBoardLogger('/UNO-main/tb_logs/discover', name=run_name)
-
     model = Discoverer(**args.__dict__)
     trainer = pl.Trainer.from_argparse_args(args, gpus='0', logger=wandb_logger)
     trainer.fit(model, dm)
