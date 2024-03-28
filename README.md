@@ -18,7 +18,8 @@
 Our implementation is based on [UNO](https://github.com/DonkeyShot21/UNO), please follow the installation of their project.
 
 # Datasets
-We have provided examples of data in the demo.
+We have provided examples of data in the demo.csv.
+
 For MIMIC-CXR-JPG Dataset, you can register and download according to the instructions on this [website](https://physionet.org/content/mimic-cxr-jpg/2.1.0/).
 
 For Chest ImaGenome Dataset, you can download according to the instructions on this [website](https://physionet.org/content/chest-imagenome/1.0.0/).
