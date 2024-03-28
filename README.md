@@ -6,13 +6,6 @@
 > **Abstract:** *In this paper, we propose a multi-modal novel class discovery method based on paired images and text, inspired by the low classification accuracy of chest X-ray images and the relatively higher accuracy of the paired text. Specifically, we first pretrain the image encoder and text encoder with multi-modal contrastive learning on the entire dataset and then we generate pseudo-labels separately on the image branch and text branch. We utilize intra-modal consistency to assess the quality of pseudo-labels and adjust the weights of the pseudo-labels from both branches to generate the ultimate pseudo-labels for training.*
 <br>
 <p align="center">
-    <img src="./assets/UNO-teaser.png"/ width=50%> <br />
-    <em>
-    A visual comparison of our UNified Objective (UNO) with previous works.
-    </em>
-</p>
-<br>
-<p align="center">
     <img src="./assets/UNO-method.png"/ width=100%> <br />
     <em>
     Overview of the proposed architecture.
@@ -31,6 +24,8 @@ For Chest ImaGenome Dataset, you can download according to the instructions on t
 
 
 # Commands
+### Pretraining
+For pretraining, please refer to [GLoRIA](https://github.com/marshuang80/gloria).
 ### Discovery
 Running discovery on set1-1:
 ```
