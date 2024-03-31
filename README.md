@@ -1,4 +1,4 @@
-# Novel Class Discovery via Paired Images and Text
+# Novel Class Discovery in Chest X-rays via Paired Images and Text
 > **AAAI 2024**
 
 > Paper: https://ojs.aaai.org/index.php/AAAI/article/view/28598
